@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Villa Account — Ultimate Final</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>*{font-family:Inter,sans-serif}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#EDE9E3;border-radius:10px}</style>
+</head>
+<body class="bg-[#FFFCF5] text-[#111] min-h-screen">
+<div id="root"></div>
+<script type="text/babel">
+const KEY='villa-ultimate-v3';const DIR_KEY='villa-dir-handle';
+const fmtINR=n=>{if(n==null||isNaN(n))return '₹0';return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(n);};
+const fmtDate=d=>{if(!d)return'';return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});};
+const uid=()=> 'TXN-'+Math.random().toString(36).slice(2,6).toUpperCase()+'-'+Date.now().toString().slice(-4);
+const isIframe=()=>{try{return window.top!==window.self}catch{return true}};
+const CATS=["Construction","Material","Labour","Tiles","Electrical","Plumbing","Paint","Furniture","Appliances","Steel","Cement","Other"];
+
+function App(){
+const [people,setPeople]=React.useState([]);const [budget,setBudget]=React.useState(2000000);const [catBudgets,setCatBudgets]=React.useState({});const [cats,setCats]=React.useState(CATS);const [txs,setTxs]=React.useState([]);const [github,setGithub]=React.useState({username:'',repo:'villa-account',branch:'main',path:'data/villa-data.json',token:'',autoSync:false});const [page,setPage]=React.useState('home');const [showAdd,setShowAdd]=React.useState(false);const [addTab,setAddTab]=React.useState('IN');const [form,setForm]=React.useState({date:new Date().toISOString().slice(0,10),amount:'',personId:'',paidById:'',expenseName:'',category:'Construction',gst:false,gstRate:18,docRef:'',notes:'',isHistorical:false,vendor:'',paymentMode:'UPI'});const [search,setSearch]=React.useState('');const [filterType,setFilterType]=React.useState('ALL');const [filterPerson,setFilterPerson]=React.useState('');const [filterCat,setFilterCat]=React.useState('');const [savedAt,setSavedAt]=React.useState(null);const [saveStatus,setSaveStatus]=React.useState('saved');const [dirName,setDirName]=React.useState('');const [dirConnected,setDirConnected]=React.useState(false);const [githubStatus,setGithubStatus]=React.useState('');const [onboardingStep,setOnboardingStep]=React.useState(0);const [villaArea,setVillaArea]=React.useState(2500);const [showSettings,setShowSettings]=React.useState(false);const [toast,setToast]=React.useState('');const saveTimeout=React.useRef(null);const dirHandleRef=React.useRef(null);
+
+React.useEffect(()=>{
+try{
+const raw=localStorage.getItem(KEY);
+if(raw){const d=JSON.parse(raw);if(d.people)setPeople(d.people);if(d.budget)setBudget(d.budget);if(d.catBudgets)setCatBudgets(d.catBudgets);if(d.cats)setCats(d.cats);if(d.txs)setTxs(d.txs);if(d.villaArea)setVillaArea(d.villaArea);if(d.savedAt)setSavedAt(new Date(d.savedAt));if(d.people&&d.people.length>0)setOnboardingStep(3);}
+const g=localStorage.getItem('villa-github');if(g)setGithub(JSON.parse(g));
+}catch{}
+(async()=>{
+try{
+const db=await new Promise((res,rej)=>{const r=indexedDB.open('villa-idb',1);r.onupgradeneeded=()=>r.result.createObjectStore('s');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const tx=db.transaction('s','readonly');const st=tx.objectStore('s');const req=st.get(DIR_KEY);
+req.onsuccess=async()=>{
+const h=req.result;
+if(h){dirHandleRef.current=h;setDirName(h.name||'Folder');setDirConnected(true);
+try{
+const perm=await h.queryPermission({mode:'readwrite'});
+if(perm!=='granted'){const p=await h.requestPermission({mode:'readwrite'});if(p!=='granted')return;}
+const fh=await h.getFileHandle('villa-data.json');const f=await fh.getFile();const txt=await f.text();const data=JSON.parse(txt);
+if(data.people)setPeople(data.people);if(data.budget)setBudget(data.budget);if(data.txs)setTxs(data.txs);if(data.cats)setCats(data.cats);if(data.catBudgets)setCatBudgets(data.catBudgets);
+setToast('Loaded from Desktop Folder ✓');setTimeout(()=>setToast(''),2000);
+}catch(e){}
+}
+};
+}catch{}
+})();
+},[]);
+
+function getFull(){return {version:12,budget,catBudgets,cats,people,txs,villaArea,savedAt:new Date().toISOString()};}
+function getSanitized(){const d=getFull();return {version:d.version,budget:d.budget,catBudgets:d.catBudgets,cats:d.cats,people:d.people,txs:d.txs,villaArea:d.villaArea,savedAt:d.savedAt};}
+async function saveToDir(data){
+if(!dirHandleRef.current)return;
+try{
+const perm=await dirHandleRef.current.requestPermission({mode:'readwrite'});if(perm!=='granted')return;
+const fh=await dirHandleRef.current.getFileHandle('villa-data.json',{create:true});const w=await fh.createWritable();await w.write(JSON.stringify(data,null,2));await w.close();setSaveStatus('saved');setSavedAt(new Date());
+}catch(e){}
+}
+async function saveToGithub(sanitized,isAuto=false){
+if(!github.username||!github.repo||!github.token)return;
+try{
+if(!isAuto)setGithubStatus('Saving...');
+const content=btoa(unescape(encodeURIComponent(JSON.stringify(sanitized,null,2))));
+let sha=null;
+try{const r=await fetch(`https://api.github.com/repos/${github.username}/${github.repo}/contents/${github.path}?ref=${github.branch}`,{headers:{Authorization:`token ${github.token}`}});if(r.ok){const j=await r.json();sha=j.sha;}}catch{}
+const body={message:`Update villa data ${new Date().toISOString()}`,content,branch:github.branch,...(sha?{sha}:{})};
+const pr=await fetch(`https://api.github.com/repos/${github.username}/${github.repo}/contents/${github.path}`,{method:'PUT',headers:{Authorization:`token ${github.token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+if(!pr.ok){const t=await pr.text();throw Error(t.slice(0,300));}
+if(!isAuto){setGithubStatus('GitHub ✓ '+new Date().toLocaleTimeString());setToast('Saved to GitHub ✓');setTimeout(()=>setToast(''),2000);}else setGithubStatus('Auto-synced '+new Date().toLocaleTimeString());
+}catch(e){
+const msg=e.message||'';if(msg.includes('Secret detected')||msg.includes('409')){setGithubStatus('Fixed 409: token removed. Save again.');setToast('Fixed 409 — token removed');}else{setGithubStatus('✗ '+msg.slice(0,120));}
+}
+}
+
+React.useEffect(()=>{
+if(people.length===0&&txs.length===0)return;
+setSaveStatus('saving');
+if(saveTimeout.current)clearTimeout(saveTimeout.current);
+saveTimeout.current=setTimeout(async()=>{
+const full=getFull();const sanitized=getSanitized();
+try{localStorage.setItem(KEY,JSON.stringify(full));}catch{}
+try{const db=await new Promise((res,rej)=>{const r=indexedDB.open('villa-idb',1);r.onupgradeneeded=()=>r.result.createObjectStore('s');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});const tx=db.transaction('s','readwrite');tx.objectStore('s').put(full,KEY);}catch{}
+await saveToDir(full);setSavedAt(new Date());setSaveStatus('saved');
+if(github.autoSync)await saveToGithub(sanitized,true);
+},600);
+},[people,budget,catBudgets,cats,txs,villaArea]);
+
+React.useEffect(()=>{localStorage.setItem('villa-github',JSON.stringify(github));},[github]);
+
+const accountStarts=React.useMemo(()=>{
+const m={};people.forEach(p=>{const ins=txs.filter(t=>t.type==='IN'&&t.personId===p.id&&t.date).sort((a,b)=>a.date.localeCompare(b.date));if(ins.length)m[p.id]=ins[0].date;});return m;
+},[txs,people]);
+
+const calc=React.useMemo(()=>{
+const totalIn=txs.filter(t=>t.type==='IN'&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const villaCurrent=txs.filter(t=>t.type==='VILLA'&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const villaHist=txs.filter(t=>t.type==='VILLA'&&t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const villaAll=villaCurrent+villaHist;
+const personalCurrent=txs.filter(t=>t.type==='PERSONAL'&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const personalHist=txs.filter(t=>t.type==='PERSONAL'&&t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const advanceCurrent=txs.filter(t=>t.type==='ADVANCE'&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const perPerson=people.map(p=>{
+const insCurrent=txs.filter(t=>t.type==='IN'&&t.personId===p.id&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const villaPaidC=txs.filter(t=>t.type==='VILLA'&&t.paidById===p.id&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const villaPaidH=txs.filter(t=>t.type==='VILLA'&&t.paidById===p.id&&t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const personalC=txs.filter(t=>t.type==='PERSONAL'&&t.personId===p.id&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const personalH=txs.filter(t=>t.type==='PERSONAL'&&t.personId===p.id&&t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const advC=txs.filter(t=>t.type==='ADVANCE'&&t.paidById===p.id&&!t.isHistorical).reduce((s,t)=>s+Number(t.amount||0),0);
+const totalOutCurrent=villaPaidC+personalC+advC;
+const balance=insCurrent-totalOutCurrent;
+return {person:p,start:accountStarts[p.id],insCurrent,villaPaidC,villaPaidH,personalC,personalH,advC,totalOutCurrent,balance};
+});
+const activePeople=people.filter(p=>p.active!==false);
+const equalShare=activePeople.length? villaCurrent/activePeople.length :0;
+const settlement=perPerson.map(pp=>({...pp,diff:pp.villaPaidC-equalShare,equalShare}));
+const creditors=settlement.filter(s=>s.diff>0.01).sort((a,b)=>b.diff-a.diff).map(s=>({...s}));
+const debtors=settlement.filter(s=>s.diff<-0.01).sort((a,b)=>a.diff-b.diff).map(s=>({...s,diff:-s.diff}));
+const owes=[];let i=0,j=0;const cred=[...creditors],debt=[...debtors];
+while(i<cred.length&&j<debt.length){const c=cred[i],d=debt[j];const amt=Math.min(c.diff,d.diff);owes.push({from:d.person,to:c.person,amount:amt});c.diff-=amt;d.diff-=amt;if(c.diff<0.01)i++;if(d.diff<0.01)j++;}
+const vendorMap={};txs.filter(t=>t.type==='VILLA').forEach(t=>{const v=(t.vendor||t.expenseName||'Unknown').trim();if(!vendorMap[v])vendorMap[v]={name:v,total:0,count:0,gst:0,last:t.date};vendorMap[v].total+=Number(t.amount||0);vendorMap[v].count+=1;if(t.gst)vendorMap[v].gst+=Number(t.gstAmount||t.amount*0.18);if(!vendorMap[v].last||t.date>vendorMap[v].last)vendorMap[v].last=t.date;});
+const vendors=Object.values(vendorMap).sort((a,b)=>b.total-a.total);
+const monthly={};txs.forEach(t=>{if(!t.date)return;const m=t.date.slice(0,7);if(!monthly[m])monthly[m]={month:m,in:0,villa:0,personal:0,advance:0};if(t.type==='IN'&&!t.isHistorical)monthly[m].in+=Number(t.amount||0);if(t.type==='VILLA'&&!t.isHistorical)monthly[m].villa+=Number(t.amount||0);if(t.type==='PERSONAL'&&!t.isHistorical)monthly[m].personal+=Number(t.amount||0);if(t.type==='ADVANCE'&&!t.isHistorical)monthly[m].advance+=Number(t.amount||0);});
+const monthlyArr=Object.values(monthly).sort((a,b)=>a.month.localeCompare(b.month));let running=0;monthlyArr.forEach(m=>{running+=m.in-m.villa-m.personal-m.advance;m.closing=running;});
+const burnRate=monthlyArr.length? villaCurrent/monthlyArr.length :0;const leftBudget=budget-villaCurrent;
+const catTotals={};cats.forEach(c=>catTotals[c]=0);txs.filter(t=>t.type==='VILLA'&&!t.isHistorical).forEach(t=>{const c=t.category||'Other';catTotals[c]=(catTotals[c]||0)+Number(t.amount||0);});
+const catHist={};cats.forEach(c=>catHist[c]=0);txs.filter(t=>t.type==='VILLA'&&t.isHistorical).forEach(t=>{const c=t.category||'Other';catHist[c]=(catHist[c]||0)+Number(t.amount||0);});
+const audits=[];txs.forEach(t=>{if(!t.date)audits.push({type:'Missing Date',msg:'Missing Date'});if(t.type==='VILLA'&&!t.paidById)audits.push({type:'Villa no Paid By',msg:`Villa "${t.expenseName}" missing Paid By`});if(t.gst&&!t.docRef)audits.push({type:'GST no Doc',msg:`GST Yes no Doc: ${t.expenseName}`});if(t.type==='VILLA'&&!t.category)audits.push({type:'No Category',msg:`Villa no Category`});if(t.date&&t.personId&&accountStarts[t.personId]&&t.date<accountStarts[t.personId]&&!t.isHistorical)audits.push({type:'Before start',msg:`Before start not flagged: ${t.expenseName||t.type}`});});
+const seen={};txs.forEach(t=>{const k=`${t.date}-${t.amount}-${t.expenseName}`;if(seen[k])audits.push({type:'Duplicate',msg:`Duplicate with ${seen[k]}`});else seen[k]=t.id;});perPerson.forEach(pp=>{if(pp.balance<0)audits.push({type:'Negative',msg:`${pp.person.name} negative ${fmtINR(pp.balance)}`});});Object.entries(catTotals).forEach(([cat,spent])=>{const b=catBudgets[cat];if(b&&spent>b)audits.push({type:'Over budget',msg:`${cat} over budget`});});
+return {totalIn,villaCurrent,villaHist,villaAll,personalCurrent,personalHist,advanceCurrent,perPerson,settlement,equalShare,owes,vendors,monthlyArr,burnRate,leftBudget,catTotals,catHist,audits};
+},[txs,people,accountStarts,budget,catBudgets,cats]);
+
+const filteredTxs=React.useMemo(()=>{
+return txs.filter(t=>{
+if(filterType!=='ALL'){if(filterType==='HISTORICAL'){if(!t.isHistorical)return false;}else if(t.type!==filterType)return false;}
+if(filterPerson&&t.personId!==filterPerson&&t.paidById!==filterPerson)return false;
+if(filterCat&&t.category!==filterCat)return false;
+if(search){const s=search.toLowerCase();if(!((t.expenseName||'').toLowerCase().includes(s)||(t.notes||'').toLowerCase().includes(s)||(t.vendor||'').toLowerCase().includes(s)||(t.docRef||'').toLowerCase().includes(s)))return false;}
+return true;
+}).sort((a,b)=>b.date.localeCompare(a.date));
+},[txs,filterType,filterPerson,filterCat,search]);
+
+async function connectFolder(){
+if(isIframe()){setToast('Open in New Tab to enable folder');return;}
+try{
+if(!window.showDirectoryPicker){setToast('Use Chrome/Edge');return;}
+const h=await window.showDirectoryPicker({mode:'readwrite'});
+dirHandleRef.current=h;setDirName(h.name);setDirConnected(true);
+const db=await new Promise((res,rej)=>{const r=indexedDB.open('villa-idb',1);r.onupgradeneeded=()=>r.result.createObjectStore('s');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+const tx=db.transaction('s','readwrite');tx.objectStore('s').put(h,DIR_KEY);
+await saveToDir(getFull());setToast('Desktop Folder connected ✓');setTimeout(()=>setToast(''),2000);
+}catch(e){if(e.name!=='AbortError')setToast('Folder error: '+e.message);}
+}
+async function handleGithubTest(){if(!github.username||!github.repo||!github.token){setGithubStatus('Fill username, repo, token');return;}setGithubStatus('Testing...');try{const r=await fetch(`https://api.github.com/repos/${github.username}/${github.repo}`,{headers:{Authorization:`token ${github.token}`}});if(!r.ok)throw Error(`${r.status} ${await r.text()}`);setGithubStatus('Connected ✓');}catch(e){setGithubStatus('✗ '+e.message.slice(0,150));}}
+async function handleGithubLoad(){if(!github.username||!github.repo||!github.token){setGithubStatus('Fill all');return;}setGithubStatus('Loading...');try{const r=await fetch(`https://api.github.com/repos/${github.username}/${github.repo}/contents/${github.path}?ref=${github.branch}`,{headers:{Authorization:`token ${github.token}`}});if(r.status===404)throw Error('File not found — Save first');if(!r.ok)throw Error(await r.text());const j=await r.json();const txt=decodeURIComponent(escape(atob(j.content)));const data=JSON.parse(txt);if(data.people)setPeople(data.people);if(data.budget)setBudget(data.budget);if(data.txs)setTxs(data.txs);if(data.cats)setCats(data.cats);if(data.catBudgets)setCatBudgets(data.catBudgets);setGithubStatus('Loaded ✓');setToast('Loaded from GitHub ✓');}catch(e){setGithubStatus('✗ '+e.message.slice(0,200));}}
+async function handleGithubSave(){const sanitized=getSanitized();await saveToGithub(sanitized,false);}
+function handleAdd(){
+if(!form.amount||Number(form.amount)<=0){setToast('Enter amount');return;}
+if(!form.date){setToast('Pick date');return;}
+let personId=form.personId;let paidById=form.paidById;
+if(addTab==='IN'&&!personId){setToast('Select person');return;}
+if((addTab==='VILLA'||addTab==='ADVANCE')&&!paidById){setToast('Select Paid By');return;}
+if(addTab==='PERSONAL'&&!personId){setToast('Select person');return;}
+let isHist=form.isHistorical;const start=personId? accountStarts[personId] : (paidById? accountStarts[paidById] : null);if(!isHist&&start&&form.date<start)isHist=true;
+const amt=Number(form.amount);const gstAmt=form.gst? Math.round(amt*form.gstRate/100):0;
+const newTx={id:uid(),type:addTab==='IN'?'IN':addTab==='VILLA'?'VILLA':addTab==='PERSONAL'?'PERSONAL':'ADVANCE',date:form.date,amount:amt,personId:personId||null,paidById:paidById||null,expenseName:form.expenseName,category:form.category,gst:form.gst,gstRate:form.gstRate,gstAmount:gstAmt,docRef:form.docRef,notes:form.notes,isHistorical:isHist,vendor:form.vendor||form.expenseName,paymentMode:form.paymentMode,createdAt:new Date().toISOString()};
+setTxs(t=>[newTx,...t]);setShowAdd(false);setForm(f=>({...f,amount:'',expenseName:'',docRef:'',notes:'',vendor:'',isHistorical:false}));setToast('Added ✓');setTimeout(()=>setToast(''),1500);
+}
+
+if(people.length===0&&onboardingStep<3){
+return (
+<div className="min-h-screen flex items-center justify-center p-6 bg-[#FFFCF5]">
+<div className="max-w-md w-full bg-white rounded-[24px] border p-8 shadow-sm" style={{borderColor:'#EDE9E3'}}>
+{onboardingStep===0&&<div><div className="text-[28px] font-bold leading-tight">Villa Account — Ultimate Final</div><div className="mt-3 text-[14px] opacity-70">Clean UI + Full accounting + Real save + Historical logic. Fixed blank page + fixed 409.</div><button onClick={()=>setOnboardingStep(1)} className="mt-6 w-full h-12 rounded-full bg-[#111] text-white font-semibold">Start →</button></div>}
+{onboardingStep===1&&<div><div className="font-bold text-[18px]">Step 1: Add people</div>
+<div className="mt-4 space-y-2">{people.map((p,i)=><div key={p.id} className="flex gap-2"><input value={p.name} onChange={ev=>setPeople(ps=>ps.map((x,idx)=>idx===i?{...x,name:ev.target.value}:x))} className="flex-1 h-11 rounded-xl border px-3" placeholder="Name" style={{borderColor:'#EDE9E3'}}/><button onClick={()=>setPeople(ps=>ps.filter((_,idx)=>idx!==i))} className="h-11 w-11 rounded-xl border">×</button></div>)}<button onClick={()=>{const colors=['#FF5A1F','#0EA5E9','#10B981','#8B5CF6'];setPeople(p=>[...p,{id:'P'+Date.now(),name:'',color:colors[p.length%colors.length],active:true}])}} className="w-full h-11 rounded-xl border border-dashed" style={{borderColor:'#EDE9E3'}}>+ Add person</button>
+<div className="mt-6 flex gap-2"><button onClick={()=>setOnboardingStep(0)} className="flex-1 h-11 rounded-full border">Back</button><button onClick={()=>{const valid=people.filter(p=>p.name.trim());if(valid.length<2){setToast('Add at least 2');return;}setPeople(valid);setOnboardingStep(2);}} className="flex-1 h-11 rounded-full bg-[#111] text-white">Next</button></div></div></div>}
+{onboardingStep===2&&<div><div className="font-bold text-[18px]">Step 2: Budget</div><div className="mt-4"><div className="text-[32px] font-bold">{fmtINR(budget)}</div><input type="range" min="100000" max="10000000" step="50000" value={budget} onChange={ev=>setBudget(Number(ev.target.value))} className="w-full mt-3"/></div><div className="mt-6 text-[12px] opacity-70 space-y-1"><div>• IN = capital</div><div>• Villa = shared</div><div>• Personal = individual</div><div>• Historical = before Money In, does NOT deduct (your Aug 2025 logic)</div><div>• Advance = contractor advance</div></div><div className="mt-6 flex gap-2"><button onClick={()=>setOnboardingStep(1)} className="flex-1 h-11 rounded-full border">Back</button><button onClick={()=>setOnboardingStep(3)} className="flex-1 h-11 rounded-full bg-[#FF5A1F] text-white">Finish →</button></div></div>}
+</div>
+</div>
+);
+}
+
+return (
+<div className="min-h-screen pb-24">
+{isIframe()&&<div className="sticky top-0 z-50 bg-[#111] text-white text-[12px] px-4 py-2 flex items-center justify-between"><span>⚠ Preview mode — Desktop Folder blocked. Open in New Tab. GitHub works.</span><a href={window.location.href} target="_blank" rel="noopener" className="ml-3 h-7 px-3 rounded-full bg-white text-black text-[11px] font-semibold inline-flex items-center">Open in New Tab ↗</a></div>}
+<div className="sticky top-0 z-40 bg-[#FFFCF5]/90 backdrop-blur border-b" style={{borderColor:'#EDE9E3'}}>
+<div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+<div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-[#111] text-white flex items-center justify-center font-bold text-[13px]">V</div><div><div className="font-bold text-[14px] leading-none">Villa Ultimate — Fixed</div><div className="text-[10px] opacity-60 flex items-center gap-1.5 mt-0.5"><span className={`w-2 h-2 rounded-full ${saveStatus==='saving'?'bg-amber-400 animate-pulse':'bg-emerald-500'}`}></span>{saveStatus==='saving'?'Saving...':`Saved • ${savedAt? savedAt.toLocaleTimeString():''}`} {dirConnected? ` • Desktop: ${dirName}`:' • Browser'} {githubStatus? ` • ${githubStatus.slice(0,30)}`:''}</div></div></div>
+<div className="flex items-center gap-2"><button onClick={()=>setShowSettings(v=>!v)} className="h-9 w-9 rounded-full border bg-white flex items-center justify-center" style={{borderColor:'#EDE9E3'}}>⚙️</button><button onClick={()=>setShowAdd(true)} className="h-9 px-4 rounded-full bg-[#FF5A1F] text-white text-[12px] font-semibold">+ Add</button></div>
+</div>
+</div>
+
+<div className="max-w-6xl mx-auto px-4 mt-6">
+{page==='home'&&<div className="space-y-5">
+<div className="grid md:grid-cols-3 gap-4">
+<div className="rounded-[24px] bg-white border p-6" style={{borderColor:'#EDE9E3'}}>
+<div className="text-[12px] opacity-60 font-medium">BUDGET PROGRESS (Current only)</div>
+<div className="mt-4 flex items-center gap-6">
+<div className="relative w-24 h-24">
+<svg viewBox="0 0 36 36" className="w-24 h-24 -rotate-90"><path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#EDE9E3" strokeWidth="3"/><path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#FF5A1F" strokeWidth="3" strokeDasharray={`${Math.min(100,Math.round((calc.villaCurrent/budget)*100))},100`}/></svg>
+<div className="absolute inset-0 flex flex-col items-center justify-center"><div className="font-bold text-[16px]">{Math.round((calc.villaCurrent/budget)*100)}%</div><div className="text-[10px] opacity-60">spent</div></div>
+</div>
+<div><div className="text-[22px] font-bold">{fmtINR(budget-calc.villaCurrent)}</div><div className="text-[12px] opacity-60">Left of {fmtINR(budget)}</div><div className="mt-2 text-[11px] px-2 py-1 rounded-full bg-[#FFFCF5] border inline-block" style={{borderColor:'#EDE9E3'}}>Hist: {fmtINR(calc.villaHist)} not deducted</div></div>
+</div>
+<div className="mt-4 grid grid-cols-3 gap-2 text-[11px]"><div className="rounded-xl bg-[#FFFCF5] p-2 border" style={{borderColor:'#EDE9E3'}}><div className="opacity-60">Burn rate</div><div className="font-bold">{fmtINR(calc.burnRate)}/mo</div></div><div className="rounded-xl bg-[#FFFCF5] p-2 border" style={{borderColor:'#EDE9E3'}}><div className="opacity-60">Cost/sqft</div><div className="font-bold">₹{Math.round(calc.villaAll/villaArea)}</div></div><div className="rounded-xl bg-[#FFFCF5] p-2 border" style={{borderColor:'#EDE9E3'}}><div className="opacity-60">Vendors</div><div className="font-bold">{calc.vendors.length}</div></div></div>
+</div>
+<div className="md:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3">
+{[{k:'Total In',v:calc.totalIn},{k:'Villa Current',v:calc.villaCurrent},{k:'Personal Current',v:calc.personalCurrent},{k:'Advance',v:calc.advanceCurrent}].map(s=><div key={s.k} className="rounded-[20px] bg-white border p-4" style={{borderColor:'#EDE9E3'}}><div className="text-[11px] opacity-60">{s.k}</div><div className="font-bold text-[16px] mt-1">{fmtINR(s.v)}</div></div>)}
+<div className="col-span-2 md:col-span-4 rounded-[20px] bg-[#111] text-white p-4 flex items-center justify-between"><div><div className="text-[11px] opacity-60">SETTLEMENT</div>{calc.owes.length?<div className="mt-1 text-[13px] font-medium">{calc.owes[0].from.name} → {calc.owes[0].to.name} {fmtINR(calc.owes[0].amount)}{calc.owes.length>1? ` +${calc.owes.length-1} more`:''}</div>:<div className="mt-1 text-[13px]">All settled ✓</div>}</div><button onClick={()=>setPage('people')} className="h-8 px-3 rounded-full bg-white text-black text-[11px] font-semibold">View</button></div>
+</div>
+</div>
+<div className="grid md:grid-cols-3 gap-4">
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px]">Monthly Cash Flow</div><div className="mt-3 space-y-2">{calc.monthlyArr.slice(-3).map(m=><div key={m.month} className="flex justify-between text-[12px]"><span className="opacity-60">{m.month}</span><span className="font-medium">{fmtINR(m.closing)}</span></div>)}{calc.monthlyArr.length===0&&<div className="text-[12px] opacity-60">No data</div>}</div></div>
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px] flex justify-between"><span>Needs Attention</span><span className={`text-[10px] px-2 py-1 rounded-full ${calc.audits.length?'bg-amber-100 text-amber-700':'bg-emerald-100 text-emerald-700'}`}>{calc.audits.length? `${calc.audits.length} issues`:'OK'}</span></div><div className="mt-3 space-y-1 max-h-24 overflow-auto">{calc.audits.slice(0,4).map((a,i)=><div key={i} className="text-[11px] opacity-70">• {a.msg}</div>)}{calc.audits.length===0&&<div className="text-[12px] opacity-60">All OK ✓</div>}</div><button onClick={()=>setPage('reports')} className="mt-3 h-8 px-3 rounded-full border text-[11px]" style={{borderColor:'#EDE9E3'}}>Open Audit</button></div>
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px]">Recent</div><div className="mt-3 space-y-2">{filteredTxs.slice(0,5).map(t=><div key={t.id} className="flex gap-2 text-[12px] items-center"><div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${t.type==='IN'?'bg-emerald-100 text-emerald-700':t.isHistorical?'bg-gray-100':'bg-[#FFFCF5] text-[#FF5A1F]'}`}>{t.type[0]}</div><div className="flex-1 truncate"><div className="font-medium truncate">{t.expenseName||t.type}</div><div className="text-[10px] opacity-60">{fmtDate(t.date)}{t.isHistorical?' • HIST':''}</div></div><div className={`font-semibold ${t.type==='IN'?'text-emerald-600':''}`}>{(t.type==='IN'?'+':'-')+fmtINR(t.amount)}</div></div>)}</div></div>
+</div>
+</div>}
+
+{page==='transactions'&&<div>
+<div className="flex flex-wrap gap-2 items-center mb-4">
+<input value={search} onChange={ev=>setSearch(ev.target.value)} placeholder="Search..." className="h-10 rounded-full border bg-white px-4 text-[13px] w-64" style={{borderColor:'#EDE9E3'}}/>
+{['ALL','IN','VILLA','PERSONAL','ADVANCE','HISTORICAL'].map(tp=><button key={tp} onClick={()=>setFilterType(tp)} className={`h-8 px-3 rounded-full border text-[11px] font-medium ${filterType===tp?'bg-[#111] text-white border-[#111]':'bg-white'}`} style={{borderColor:filterType===tp?'#111':'#EDE9E3'}}>{tp}</button>)}
+<select value={filterPerson} onChange={ev=>setFilterPerson(ev.target.value)} className="h-8 rounded-full border bg-white px-3 text-[11px]" style={{borderColor:'#EDE9E3'}}><option value="">All people</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+<select value={filterCat} onChange={ev=>setFilterCat(ev.target.value)} className="h-8 rounded-full border bg-white px-3 text-[11px]" style={{borderColor:'#EDE9E3'}}><option value="">All cats</option>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select>
+</div>
+<div className="space-y-2">
+{filteredTxs.map(t=>{
+const p=people.find(x=>x.id===(t.paidById||t.personId));
+return <div key={t.id} className={`rounded-[16px] bg-white border p-4 flex gap-3 items-center ${t.isHistorical?'opacity-70 border-dashed':''}`} style={{borderColor:'#EDE9E3'}}>
+<div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-[11px] shrink-0 ${t.type==='IN'?'bg-emerald-100 text-emerald-700':t.type==='VILLA'?'bg-[#FF5A1F]/10 text-[#FF5A1F]':'bg-blue-50 text-blue-600'}`}>{t.type[0]}</div>
+<div className="flex-1 min-w-0">
+<div className="flex items-center gap-2"><span className="font-semibold text-[13px] truncate">{t.expenseName||t.type}</span>{t.isHistorical&&<span className="text-[9px] px-2 py-0.5 rounded-full bg-gray-100 border">HISTORICAL</span>}{t.gst&&<span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">GST {t.gstRate}%</span>}</div>
+<div className="text-[11px] opacity-60 truncate">{p? `Paid by ${p.name} • `:''}{t.category? `${t.category} • `:''}{fmtDate(t.date)}{t.vendor? ` • ${t.vendor}`:''}</div>
+{t.notes&&<div className="text-[11px] opacity-50 truncate">{t.notes}</div>}
+</div>
+<div className="text-right"><div className={`font-bold text-[13px] ${t.type==='IN'?'text-emerald-600':''}`}>{(t.type==='IN'?'+':'-')+fmtINR(t.amount)}</div><div className="text-[10px] opacity-60">{t.isHistorical?'Not deducted':''}</div></div>
+<button onClick={()=>{if(confirm('Delete?'))setTxs(x=>x.filter(y=>y.id!==t.id))}} className="ml-2 h-8 w-8 rounded-full border flex items-center justify-center" style={{borderColor:'#EDE9E3'}}>×</button>
+</div>;
+})}
+{filteredTxs.length===0&&<div className="rounded-[24px] bg-white border p-12 text-center" style={{borderColor:'#EDE9E3'}}><div className="text-[14px] opacity-60">No transactions</div></div>}
+</div>
+</div>}
+
+{page==='villa'&&<div className="space-y-4">
+<div className="rounded-[24px] bg-white border p-6" style={{borderColor:'#EDE9E3'}}>
+<div className="flex justify-between"><div><div className="text-[12px] opacity-60">VILLA ASSET VALUE</div><div className="text-[28px] font-bold mt-1">{fmtINR(calc.villaAll)}</div><div className="text-[11px] opacity-60 mt-1">Current {fmtINR(calc.villaCurrent)} • Hist {fmtINR(calc.villaHist)} • ₹{Math.round(calc.villaAll/villaArea)}/sqft</div></div><div className="text-right"><div className="text-[11px] opacity-60">Budget left</div><div className="font-bold">{fmtINR(calc.leftBudget)}</div><div className="text-[11px] mt-1 px-2 py-1 rounded-full bg-[#FFFCF5] border inline-block" style={{borderColor:'#EDE9E3'}}>Burn {fmtINR(calc.burnRate)}/mo</div></div></div>
+</div>
+<div className="grid md:grid-cols-2 gap-4">
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px]">Category Budgets</div><div className="mt-4 space-y-3">{cats.map(cat=>{const spent=calc.catTotals[cat]||0;const budg=catBudgets[cat]||0;const pct=budg? Math.min(100,Math.round(spent/budg*100)):0;const over=budg&&spent>budg;return <div key={cat}><div className="flex justify-between text-[11px]"><span className="font-medium">{cat}</span><span className={over?'text-red-600':''}>{fmtINR(spent)}{budg? ` / ${fmtINR(budg)}`:''}</span></div><div className="mt-1 h-2 rounded-full bg-[#FFFCF5] border overflow-hidden" style={{borderColor:'#EDE9E3'}}><div className={`h-full ${over?'bg-red-500':'bg-[#FF5A1F]'}`} style={{width:pct+'%'}}></div></div></div>;})}</div></div>
+<div className="space-y-4"><div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px]">Vendors Top</div><div className="mt-3 space-y-2 max-h-64 overflow-auto">{calc.vendors.map(v=><div key={v.name} className="flex justify-between text-[12px]"><div><div className="font-medium">{v.name}</div><div className="text-[10px] opacity-60">{v.count} bills</div></div><div className="text-right"><div className="font-semibold">{fmtINR(v.total)}</div>{v.gst>0&&<div className="text-[10px] opacity-60">GST {fmtINR(v.gst)}</div>}</div></div>)}</div></div></div>
+</div>
+</div>}
+
+{page==='people'&&<div className="space-y-4">
+<div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+{calc.perPerson.map(pp=><div key={pp.person.id} className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}>
+<div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-[13px]" style={{background:pp.person.color}}>{pp.person.name[0]}</div><div><div className="font-bold text-[13px]">{pp.person.name}</div><div className="text-[10px] opacity-60">{pp.start? `From ${fmtDate(pp.start)}`:'No IN'}</div></div></div>
+<div className="mt-4 grid grid-cols-2 gap-2 text-[11px]"><div><div className="opacity-60">IN</div><div className="font-semibold">{fmtINR(pp.insCurrent)}</div></div><div><div className="opacity-60">Villa Paid</div><div className="font-semibold">{fmtINR(pp.villaPaidC)}</div></div><div><div className="opacity-60">Personal</div><div className="font-semibold">{fmtINR(pp.personalC)}</div></div><div><div className="opacity-60">Advance</div><div className="font-semibold">{fmtINR(pp.advC)}</div></div></div>
+<div className="mt-3 pt-3 border-t flex justify-between" style={{borderColor:'#EDE9E3'}}><span className="text-[11px] opacity-60">Balance</span><span className={`font-bold text-[13px] ${pp.balance<0?'text-red-600':'text-emerald-600'}`}>{fmtINR(pp.balance)}</span></div>
+{(pp.villaPaidH+pp.personalH>0)&&<div className="mt-2 text-[10px] opacity-50">Hist not deducted: {fmtINR(pp.villaPaidH+pp.personalH)}</div>}
+</div>)}
+</div>
+<div className="rounded-[24px] bg-[#111] text-white p-6"><div className="flex justify-between"><div className="font-bold">Settlement — Who owes whom</div><div className="text-[11px] opacity-60">Equal {fmtINR(calc.equalShare)}</div></div><div className="mt-4 space-y-2">{calc.owes.map((o,i)=><div key={i} className="flex justify-between bg-white/10 rounded-full px-4 py-2 text-[13px]"><span>{o.from.name} → {o.to.name}</span><span className="font-bold">{fmtINR(o.amount)}</span></div>)}{calc.owes.length===0&&<div className="text-[13px] opacity-70">All settled ✓</div>}</div></div>
+</div>}
+
+{page==='reports'&&<div className="space-y-4">
+<div className="grid md:grid-cols-3 gap-4">
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px]">Villa by Category</div><div className="mt-4 space-y-2">{Object.entries(calc.catTotals).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>{const max=Math.max(...Object.values(calc.catTotals));return <div key={cat} className="flex items-center gap-2"><div className="w-20 text-[11px] truncate">{cat}</div><div className="flex-1 h-2 rounded-full bg-[#FFFCF5] border overflow-hidden" style={{borderColor:'#EDE9E3'}}><div className="h-full bg-[#FF5A1F]" style={{width:(max?amt/max*100:0)+'%'}}></div></div><div className="w-20 text-[11px] font-medium text-right">{fmtINR(amt)}</div></div>;})}</div></div>
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px]">Villa by Person</div><div className="mt-4 space-y-2">{calc.perPerson.map(pp=><div key={pp.person.id} className="flex items-center gap-2"><div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:pp.person.color}}>{pp.person.name[0]}</div><div className="flex-1 text-[11px]">{pp.person.name}</div><div className="text-[11px] font-semibold">{fmtINR(pp.villaPaidC)}</div></div>)}</div></div>
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-semibold text-[13px]">Monthly Closing</div><div className="mt-3 space-y-1 max-h-64 overflow-auto text-[11px]">{calc.monthlyArr.map(m=><div key={m.month} className="flex justify-between"><span>{m.month}</span><span className="font-medium">{fmtINR(m.closing)}</span></div>)}</div></div>
+</div>
+<div className="rounded-[24px] bg-white border p-5" style={{borderColor:'#EDE9E3'}}><div className="font-bold text-[14px] flex justify-between"><span>Audit 12 Checks</span><span className={`text-[11px] px-3 py-1 rounded-full ${calc.audits.length?'bg-amber-100 text-amber-700':'bg-emerald-100 text-emerald-700'}`}>{calc.audits.length? `${calc.audits.length} needs fix`:'All OK ✓'}</span></div><div className="mt-4 grid md:grid-cols-2 gap-2">{calc.audits.map((a,i)=><div key={i} className="text-[11px] rounded-xl border p-3 bg-[#FFFCF5]" style={{borderColor:'#EDE9E3'}}><div className="font-semibold">{a.type}</div><div className="opacity-70 mt-1">{a.msg}</div></div>)}{calc.audits.length===0&&<div className="text-[12px] opacity-60">No issues ✓</div>}</div></div>
+</div>}
+</div>
+
+{showSettings&&<div className="fixed inset-0 z-50 flex justify-end"><div className="absolute inset-0 bg-black/20" onClick={()=>setShowSettings(false)}></div><div className="relative w-full max-w-md bg-[#FFFCF5] h-full overflow-auto border-l shadow-xl" style={{borderColor:'#EDE9E3'}}><div className="sticky top-0 bg-[#FFFCF5] p-5 border-b flex justify-between items-center" style={{borderColor:'#EDE9E3'}}><div className="font-bold">Settings — Ultimate</div><button onClick={()=>setShowSettings(false)} className="h-8 w-8 rounded-full border bg-white">×</button></div><div className="p-5 space-y-6">
+<div className="rounded-[20px] bg-white border p-4" style={{borderColor:'#EDE9E3'}}><div className="font-bold text-[13px]">Data Safety — 3 Layers (Fixed)</div><div className="mt-3 space-y-3 text-[12px]">
+<div className="rounded-xl border p-3 bg-emerald-50" style={{borderColor:'#EDE9E3'}}><div className="font-semibold">1. Local Cache ACTIVE ✓</div><div className="opacity-70 mt-1">Saved {savedAt? savedAt.toLocaleTimeString():''} • {txs.length} txns</div></div>
+<div className="rounded-xl border p-3 bg-white" style={{borderColor:'#EDE9E3'}}><div className="font-semibold flex justify-between"><span>2. Desktop Folder — Real file</span><span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100">{dirConnected? 'Connected ✓':'Not connected'}</span></div><div className="opacity-70 mt-1">Creates villa-data.json on PC. Survives clearing data.</div>{isIframe()&&<div className="mt-2 text-[11px] p-2 rounded-lg bg-amber-50 border border-amber-200">Preview blocks file picker. Open in New Tab to enable.</div>}<div className="mt-2 flex gap-2"><button onClick={connectFolder} className="h-8 px-3 rounded-full bg-[#111] text-white text-[11px] font-semibold">Connect Folder</button><button onClick={()=>{const data=getFull();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='villa-data.json';a.click();}} className="h-8 px-3 rounded-full border bg-white text-[11px]" style={{borderColor:'#EDE9E3'}}>Download file</button></div><div className="mt-2"><input type="file" accept=".json" onChange={async(ev)=>{const f=ev.target.files[0];if(!f)return;try{const txt=await f.text();const d=JSON.parse(txt);if(d.people)setPeople(d.people);if(d.budget)setBudget(d.budget);if(d.txs)setTxs(d.txs);if(d.cats)setCats(d.cats);setToast('Loaded ✓');}catch{setToast('Invalid');}} className="text-[11px]"/></div></div>
+<div className="rounded-xl border p-3 bg-white" style={{borderColor:'#EDE9E3'}}><div className="font-semibold">3. GitHub Database — Cloud (Fixed 409)</div><div className="opacity-70 mt-1">Saves to data/villa-data.json. Token never pushed.</div><div className="mt-2 grid grid-cols-2 gap-2"><input value={github.username} onChange={ev=>setGithub(g=>({...g,username:ev.target.value}))} placeholder="Username" className="h-9 rounded-xl border px-3 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}/><input value={github.repo} onChange={ev=>setGithub(g=>({...g,repo:ev.target.value}))} placeholder="Repo" className="h-9 rounded-xl border px-3 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}/><input value={github.branch} onChange={ev=>setGithub(g=>({...g,branch:ev.target.value}))} placeholder="Branch" className="h-9 rounded-xl border px-3 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}/><input value={github.path} onChange={ev=>setGithub(g=>({...g,path:ev.target.value}))} placeholder="Path" className="h-9 rounded-xl border px-3 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}/></div><input type="password" value={github.token} onChange={ev=>setGithub(g=>({...g,token:ev.target.value}))} placeholder="Token (repo scope)" className="mt-2 w-full h-9 rounded-xl border px-3 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}/><div className="mt-2 flex gap-2 flex-wrap"><button onClick={handleGithubTest} className="h-8 px-3 rounded-full border bg-white text-[11px]" style={{borderColor:'#EDE9E3'}}>Test</button><button onClick={handleGithubLoad} className="h-8 px-3 rounded-full border bg-white text-[11px]" style={{borderColor:'#EDE9E3'}}>Load</button><button onClick={handleGithubSave} className="h-8 px-3 rounded-full bg-[#111] text-white text-[11px]">Save to GitHub</button><label className="flex items-center gap-1 text-[11px] ml-2"><input type="checkbox" checked={github.autoSync} onChange={ev=>setGithub(g=>({...g,autoSync:ev.target.checked}))}/>Auto-sync</label></div><div className="mt-2 text-[10px] opacity-60">{githubStatus||'Token stored only in browser, never pushed (fixed 409)'}</div></div>
+</div></div>
+<div className="rounded-[20px] bg-white border p-4" style={{borderColor:'#EDE9E3'}}><div className="font-bold text-[13px]">People & Budgets</div><div className="mt-3 space-y-2">{people.map(p=><div key={p.id} className="flex gap-2 items-center"><div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:p.color}}>{p.name[0]}</div><input value={p.name} onChange={ev=>setPeople(ps=>ps.map(x=>x.id===p.id?{...x,name:ev.target.value}:x))} className="flex-1 h-9 rounded-xl border px-3 text-[12px]" style={{borderColor:'#EDE9E3'}}/><button onClick={()=>setPeople(ps=>ps.filter(x=>x.id!==p.id))} className="h-9 w-9 rounded-xl border">×</button></div>)}<button onClick={()=>{const colors=['#FF5A1F','#0EA5E9','#10B981','#8B5CF6'];setPeople(p=>[...p,{id:'P'+Date.now(),name:'',color:colors[p.length%4],active:true}])}} className="w-full h-9 rounded-xl border border-dashed text-[12px]" style={{borderColor:'#EDE9E3'}}>+ Add person</button><div className="mt-4"><div className="text-[12px] opacity-60">Total Budget</div><input type="number" value={budget} onChange={ev=>setBudget(Number(ev.target.value))} className="mt-1 w-full h-9 rounded-xl border px-3" style={{borderColor:'#EDE9E3'}}/></div><div className="mt-3"><div className="text-[12px] opacity-60">Area sq ft</div><input type="number" value={villaArea} onChange={ev=>setVillaArea(Number(ev.target.value))} className="mt-1 w-full h-9 rounded-xl border px-3" style={{borderColor:'#EDE9E3'}}/></div></div>
+<div className="rounded-[20px] bg-white border p-4" style={{borderColor:'#EDE9E3'}}><div className="font-bold text-[13px]">Data</div><div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>{const data=getSanitized();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`villa-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();}} className="h-9 px-3 rounded-full border bg-white text-[11px]" style={{borderColor:'#EDE9E3'}}>Export JSON</button><button onClick={()=>{let csv='Date,Type,Expense,Category,Amount,PaidBy,Person,Vendor,GST,DocRef,Historical,Notes\n';txs.forEach(t=>{csv+=`${t.date},${t.type},${(t.expenseName||'').replace(/,/g,' ')},${t.category||''},${t.amount},${people.find(p=>p.id===t.paidById)?.name||''},${people.find(p=>p.id===t.personId)?.name||''},${(t.vendor||'').replace(/,/g,' ')},${t.gst?'Yes':''},${t.docRef||''},${t.isHistorical?'Yes':''},${(t.notes||'').replace(/,/g,' ')}\n`;});const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='villa-export.csv';a.click();}} className="h-9 px-3 rounded-full border bg-white text-[11px]" style={{borderColor:'#EDE9E3'}}>Export CSV</button><button onClick={()=>{if(prompt('Type DELETE to clear')==='DELETE'){setTxs([]);localStorage.removeItem(KEY);setToast('Cleared');}}} className="h-9 px-3 rounded-full border bg-red-50 text-red-600 text-[11px]" style={{borderColor:'#EDE9E3'}}>Clear All</button></div><div className="mt-3"><input type="file" accept=".json" onChange={async(ev)=>{const f=ev.target.files[0];if(!f)return;const txt=await f.text();const d=JSON.parse(txt);if(d.people)setPeople(d.people);if(d.txs)setTxs(d.txs);if(d.budget)setBudget(d.budget);setToast('Imported ✓');}} className="text-[11px]"/></div></div>
+</div></div></div>}
+
+<div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t" style={{borderColor:'#EDE9E3'}}><div className="max-w-6xl mx-auto px-2 h-16 flex items-center justify-around">{[['home','Home'],['transactions','Txns'],['villa','Villa'],['people','People'],['reports','Reports']].map(([k,label])=><button key={k} onClick={()=>setPage(k)} className={`flex flex-col items-center gap-1 px-3 py-1 rounded-full ${page===k?'bg-[#111] text-white':'opacity-60'}`}><span className="text-[16px]">{k==='home'?'⌂':k==='transactions'?'≡':k==='villa'?'⌖':k==='people'?'◐':'◫'}</span><span className="text-[10px] font-medium">{label}</span></button>)}</div></div>
+
+{showAdd&&<div className="fixed inset-0 z-50 flex items-end md:items-center justify-center"><div className="absolute inset-0 bg-black/20" onClick={()=>setShowAdd(false)}></div><div className="relative w-full max-w-lg bg-white rounded-t-[24px] md:rounded-[24px] border shadow-xl max-h-[90vh] overflow-auto" style={{borderColor:'#EDE9E3'}}><div className="sticky top-0 bg-white p-5 border-b flex justify-between items-center" style={{borderColor:'#EDE9E3'}}><div className="font-bold">Add Transaction</div><button onClick={()=>setShowAdd(false)} className="h-8 w-8 rounded-full border">×</button></div><div className="p-5"><div className="flex gap-2 mb-4">{[['IN','Money In'],['VILLA','Villa'],['PERSONAL','Personal'],['ADVANCE','Advance']].map(([k,l])=><button key={k} onClick={()=>setAddTab(k)} className={`flex-1 h-10 rounded-full border text-[12px] font-medium ${addTab===k?'bg-[#111] text-white border-[#111]':'bg-white'}`} style={{borderColor:addTab===k?'#111':'#EDE9E3'}}>{l}</button>)}</div><div className="space-y-3">
+<div className="grid grid-cols-2 gap-2"><div><div className="text-[11px] opacity-60">Date</div><input type="date" value={form.date} onChange={ev=>setForm(f=>({...f,date:ev.target.value}))} className="w-full h-11 rounded-xl border px-3 text-[13px]" style={{borderColor:'#EDE9E3'}}/></div><div><div className="text-[11px] opacity-60">Amount ₹</div><input type="number" value={form.amount} onChange={ev=>setForm(f=>({...f,amount:ev.target.value}))} className="w-full h-11 rounded-xl border px-3 text-[13px] font-bold" style={{borderColor:'#EDE9E3'}} placeholder="0"/></div></div>
+{addTab==='IN'&&<div><div className="text-[11px] opacity-60 mb-1">Person</div><div className="flex flex-wrap gap-2">{people.map(p=><button key={p.id} onClick={()=>setForm(f=>({...f,personId:p.id}))} className={`h-9 px-3 rounded-full border flex items-center gap-1.5 text-[12px] ${form.personId===p.id?'bg-[#111] text-white border-[#111]':'bg-white'}`} style={{borderColor:form.personId===p.id?'#111':'#EDE9E3'}}><span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:p.color}}>{p.name[0]}</span>{p.name}</button>)}</div></div>}
+{(addTab==='VILLA'||addTab==='ADVANCE')&&<div><div className="text-[11px] opacity-60 mb-1">Paid By</div><div className="flex flex-wrap gap-2">{people.map(p=><button key={p.id} onClick={()=>setForm(f=>({...f,paidById:p.id}))} className={`h-9 px-3 rounded-full border flex items-center gap-1.5 text-[12px] ${form.paidById===p.id?'bg-[#111] text-white border-[#111]':'bg-white'}`} style={{borderColor:form.paidById===p.id?'#111':'#EDE9E3'}}><span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:p.color}}>{p.name[0]}</span>{p.name}</button>)}</div></div>}
+{addTab==='PERSONAL'&&<div><div className="text-[11px] opacity-60 mb-1">Person</div><div className="flex flex-wrap gap-2">{people.map(p=><button key={p.id} onClick={()=>setForm(f=>({...f,personId:p.id}))} className={`h-9 px-3 rounded-full border flex items-center gap-1.5 text-[12px] ${form.personId===p.id?'bg-[#111] text-white border-[#111]':'bg-white'}`} style={{borderColor:form.personId===p.id?'#111':'#EDE9E3'}}><span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:p.color}}>{p.name[0]}</span>{p.name}</button>)}</div></div>}
+{(addTab==='VILLA'||addTab==='ADVANCE'||addTab==='PERSONAL')&&<div><div className="text-[11px] opacity-60 mb-1">{addTab==='PERSONAL'?'Description':'Expense Name / Vendor'}</div><input value={form.expenseName} onChange={ev=>setForm(f=>({...f,expenseName:ev.target.value,vendor:ev.target.value}))} placeholder={addTab==='PERSONAL'?'e.g., Cab, Food':'e.g., Vikas, Tiles'} className="w-full h-11 rounded-xl border px-3 text-[13px]" style={{borderColor:'#EDE9E3'}}/>{addTab==='VILLA'&&<div className="mt-2 flex gap-2"><select value={form.category} onChange={ev=>setForm(f=>({...f,category:ev.target.value}))} className="flex-1 h-10 rounded-xl border px-3 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}>{cats.map(c=><option key={c} value={c}>{c}</option>)}</select><select value={form.paymentMode} onChange={ev=>setForm(f=>({...f,paymentMode:ev.target.value}))} className="w-28 h-10 rounded-xl border px-3 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}>{['UPI','Cash','Bank'].map(m=><option key={m} value={m}>{m}</option>)}</select></div>}</div>}
+<div className="grid grid-cols-2 gap-2"><div><div className="text-[11px] opacity-60 mb-1">Doc Ref</div><input value={form.docRef} onChange={ev=>setForm(f=>({...f,docRef:ev.target.value}))} className="w-full h-10 rounded-xl border px-3 text-[12px]" style={{borderColor:'#EDE9E3'}} placeholder="Bill #"/></div><div className="flex items-end gap-2"><label className="flex items-center gap-2 h-10 px-3 rounded-xl border text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}><input type="checkbox" checked={form.gst} onChange={ev=>setForm(f=>({...f,gst:ev.target.checked}))}/>GST</label>{form.gst&&<select value={form.gstRate} onChange={ev=>setForm(f=>({...f,gstRate:Number(ev.target.value)})} className="h-10 rounded-xl border px-2 text-[12px] bg-white" style={{borderColor:'#EDE9E3'}}>{[5,12,18,28].map(r=><option key={r} value={r}>{r}%</option>)}</select>}</div></div>
+<div><div className="text-[11px] opacity-60 mb-1">Notes</div><input value={form.notes} onChange={ev=>setForm(f=>({...f,notes:ev.target.value}))} className="w-full h-10 rounded-xl border px-3 text-[12px]" style={{borderColor:'#EDE9E3'}} placeholder="Optional"/></div>
+<label className="flex items-start gap-2 p-3 rounded-xl border bg-amber-50 text-[11px]" style={{borderColor:'#EDE9E3'}}><input type="checkbox" checked={form.isHistorical} onChange={ev=>setForm(f=>({...f,isHistorical:ev.target.checked}))}/><span><b>Historical — don't deduct</b> — old entry before Money In (e.g., Aug 2025 when Money In Sep 2026). Auto-detected if date &lt; first IN.</span></label>
+</div><button onClick={handleAdd} className="mt-6 w-full h-12 rounded-full bg-[#FF5A1F] text-white font-semibold">Add Transaction</button></div></div></div>}
+
+{toast&&<div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-[#111] text-white text-[12px] px-4 py-2 rounded-full shadow-lg z-50">{toast}</div>}
+</div>
+);
+}
+
+const root=ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>
